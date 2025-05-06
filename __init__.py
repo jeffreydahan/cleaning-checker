@@ -14,7 +14,7 @@
 
 """Includes all shared libraries for the agent."""
 
-from . import agent_regular
+from . import agent
 
 
-__all__ = ["agent_regular"]
+__all__ = ["agent"]

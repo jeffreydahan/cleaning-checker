@@ -1,26 +1,97 @@
 from google.adk.agents import Agent
 from google import genai
 from google.genai import types
+import os
+from google.cloud import storage
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env file
+
+# Helper function to get environment variables
+def get_env_var(key):
+    value = os.getenv(key)
+    if value is None:
+        raise ValueError(f"Environment variable '{key}' not found.")
+    return value
+
+# Function to select the most recent file in a storage bucket folder
+def get_most_recent_file_with_extension_check(bucket_name: str, folder: str):
+  """Gets the most recent file in a GCS bucket folder and checks if its
+  extension is one of .mov, .mp4, .jpg, .jpeg, or .png.
+
+  Args:
+    bucket_name: The name of the storage bucket.
+    folder: The path of the folder in the storage bucket (should NOT end with a '/').
+
+  Returns:
+    A tuple containing the GCS file path of the most recent file and its mime type.
+
+  Raises:
+    ValueError: If the folder does not exist, no files are found in the folder,
+                or the most recent file's extension is not one of the allowed types.
+  """
+  client = storage.Client()
+  bucket = client.bucket(bucket_name)
+  print(f"Bucket name: {bucket.name}")
+
+  folder_prefix = folder + "/"
+
+  # Check if the folder exists by listing blobs with the folder prefix and limiting to 1
+  blobs = bucket.list_blobs(prefix=folder_prefix, max_results=1)
+  if not any(blobs):
+    raise ValueError(f"Folder '{folder}' does not exist in bucket '{bucket_name}'.")
+
+  # Get all blobs within the specified folder
+  blobs = bucket.list_blobs(prefix=folder_prefix)
+  most_recent_blob = None
+
+  for blob in blobs:
+    if most_recent_blob is None or blob.updated > most_recent_blob.updated:
+      most_recent_blob = blob
+
+  if most_recent_blob is None:
+    raise ValueError(f"No files found in folder '{folder}'.")
+
+  _, file_extension = most_recent_blob.name.rsplit('.', 1) if '.' in most_recent_blob.name else ('', '')
+  file_extension = "." + file_extension.lower()
+
+  mime_type = None
+  if file_extension == ".mov":
+    mime_type = "video/quicktime"
+  elif file_extension == ".mp4":
+    mime_type = "video/mp4"
+  elif file_extension == ".jpg":
+    mime_type = "image/jpeg"
+  elif file_extension == ".jpeg":
+    mime_type = "image/jpeg"
+  elif file_extension == ".png":
+    mime_type = "image/png"
+  else:
+    raise ValueError(f"Unrecognized file extension: '{file_extension}' for file '{most_recent_blob.name}'. "
+                     f"Allowed extensions are: .mov, .mp4, .jpg, .jpeg, .png")
+
+  return f"gs://{bucket_name}/{most_recent_blob.name}", mime_type
 
 # Define a function to analyze the media and determine if cleaning is needed
-async def check_if_dirty(file_uri: str) -> str:
+async def check_if_dirty(room: str) -> str:
   """Analyzes a video to determine if the floor is dirty.
 
   Args:
-    file_uri: The Google Cloud Storage URI of the video file.
+    room: The name of the room to analyze
 
   Returns:
     A string indicating whether the room is "dirty" or "clean".
   """
   client = genai.Client(
       vertexai=True,
-      project="adk-testing-458009",
-      location="us-central1",
+      project=get_env_var("GOOGLE_CLOUD_PROJECT"),
+      location=get_env_var("GOOGLE_CLOUD_LOCATION"),
   )
 
+  file, mime = get_most_recent_file_with_extension_check(get_env_var("GOOGLE_CLOUD_STORAGE_BUCKET"), room)
   msg1_video1 = types.Part.from_uri(
-      file_uri=file_uri,
-      mime_type="video/quicktime",
+    file_uri = file,
+    mime_type = mime,
   )
 
   model = "gemini-2.0-flash-001"
@@ -29,7 +100,11 @@ async def check_if_dirty(file_uri: str) -> str:
       role="user",
       parts=[
         msg1_video1,
-        types.Part.from_text(text="""if this floor is very dirty, respond back that the room is dirty.  Otherwise, say the room is clean""")
+        types.Part.from_text(text="""
+          if this floor is very dirty, respond back 
+          that the room is dirty.  Otherwise, say the room is clean
+          """
+        )
       ]
     ),
   ]
@@ -84,10 +159,10 @@ root_agent = Agent(
         Other than the sample responses above, do not provide any others - meaning, either recommend a room
         to clean, or simply ensure the vacuum is docked and then get the status.
 
-        You can analyze two rooms.  Utilize the associated file_uri with the room for the check_if_dirty function/tool:
-
-        kitchen: gs://adk-a2a-rooms/kitchen/IMG_3848.MOV
-        hallway: gs://adk-a2a-rooms/hallway/IMG_3851.MOV
+        pass the name of the room specified (for example, kitchen, hallway, entryway, bathroom) as the value
+        for the variable folder to the check_if_dirty tool
         """,
-    tools=[check_if_dirty],
+    tools=[
+       check_if_dirty
+    ],
 )
