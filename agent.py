@@ -17,7 +17,7 @@ def get_env_var(key):
 # Function to select the most recent file in a storage bucket folder
 def get_most_recent_file_with_extension_check(bucket_name: str, folder: str):
   """Gets the most recent file in a GCS bucket folder and checks if its
-  extension is one of .mov, .mp4, .jpg, .jpeg, or .png.
+  extension is one of .mov, .mp4, .jpg, .jpeg, .png, or .avi.
 
   Args:
     bucket_name: The name of the storage bucket.
@@ -66,9 +66,11 @@ def get_most_recent_file_with_extension_check(bucket_name: str, folder: str):
     mime_type = "image/jpeg"
   elif file_extension == ".png":
     mime_type = "image/png"
+  elif file_extension == ".avi":
+    mime_type = "video/x-msvideo"
   else:
     raise ValueError(f"Unrecognized file extension: '{file_extension}' for file '{most_recent_blob.name}'. "
-                     f"Allowed extensions are: .mov, .mp4, .jpg, .jpeg, .png")
+                     f"Allowed extensions are: .mov, .mp4, .jpg, .jpeg, .png, .avi")
 
   return f"gs://{bucket_name}/{most_recent_blob.name}", mime_type
 
@@ -100,7 +102,8 @@ async def check_if_dirty(room: str) -> str:
       role="user",
       parts=[
         msg1_video1,
-        types.Part.from_text(text="""
+        types.Part.from_text(
+          text="""
           if this floor is very dirty, respond back 
           that the room is dirty.  Otherwise, say the room is clean
           """
